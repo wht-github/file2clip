@@ -16,6 +16,8 @@ class Program
 
     [DllImport("user32.dll")]
     static extern IntPtr SetClipboardData(uint uFormat, IntPtr hMem);
+    [DllImport("user32.dll")]
+    static extern IntPtr GetClipboardData(uint uFormat);
 
     [DllImport("kernel32.dll")]
     static extern IntPtr GlobalAlloc(uint uFlags, UIntPtr dwBytes);
@@ -64,7 +66,7 @@ class Program
                 Console.WriteLine($"File found: {file}");
             }
         }
-        files = files.Select(Path.GetFullPath).Select(f => f.Trim()).ToArray();
+        files = files.Select(file => Path.GetFullPath(file).ToLowerInvariant()).ToArray();
         SetFileDrop(files);
     }
 
@@ -85,7 +87,12 @@ class Program
             var file_chars = file.ToCharArray();
             size += (file_chars.Length + 1) * Marshal.SystemDefaultCharSize;
         }
-        size += Marshal.SizeOf(typeof(DROPFILES)) + Marshal.SystemDefaultCharSize; // +2 for null terminator
+        size += Marshal.SizeOf(typeof(DROPFILES)) + Marshal.SystemDefaultCharSize * 2; // +2 for null terminator
+        if (size % 1024 != 0)
+        {
+            size += 1024 - (size % 1024);
+        }
+        size *= 2;
         // Console.WriteLine($"Size: {size}");
         IntPtr hGlobal = IntPtr.Zero;
 
@@ -116,39 +123,39 @@ class Program
             foreach (string file in files)
             {
                 var file_chars = file.ToCharArray();
+                // Console.WriteLine($"Copying file path: {new string(file_chars)}");
                 Marshal.Copy(file_chars, 0, filePathPtr, file_chars.Length);
                 filePathPtr = IntPtr.Add(filePathPtr, file_chars.Length * Marshal.SystemDefaultCharSize);
-                Marshal.WriteByte(filePathPtr, 0); // Null-terminate each string
+                Marshal.WriteByte(filePathPtr, (byte)'\0'); // Null-terminate each string
                 filePathPtr = IntPtr.Add(filePathPtr, Marshal.SystemDefaultCharSize);
             }
-            Marshal.WriteByte(filePathPtr, 0); // Null-terminate the list
+            Marshal.WriteByte(filePathPtr, (byte)'\0'); // Null-terminate the list
 
             GlobalUnlock(hGlobal);
-
+            if (EmptyClipboard())
+            {
+                Console.WriteLine("Clipboard cleared.");
+            }
             if (OpenClipboard(IntPtr.Zero))
             {
-                if (EmptyClipboard())
-                {
-                    Console.WriteLine("Clipboard cleared.");
-                }
                 if (SetClipboardData(CF_HDROP, hGlobal) != IntPtr.Zero)
                 {
                     Console.WriteLine("Files copied to clipboard.");
                 }
+                CloseClipboard();
             }
         }
         catch (Exception e)
         {
             Console.WriteLine(e.Message);
-            if (hGlobal != IntPtr.Zero)
-            {
-                Console.WriteLine("Freeing global memory.");
-                GlobalUnlock(hGlobal);
-            }
         }
         finally
         {
-            CloseClipboard();
+            if (hGlobal != IntPtr.Zero)
+            {
+                // Console.WriteLine("Freeing global memory.");
+                GlobalUnlock(hGlobal);
+            }
         }
     }
 }
