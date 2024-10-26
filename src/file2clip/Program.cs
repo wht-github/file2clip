@@ -64,6 +64,7 @@ class Program
                 Console.WriteLine($"File found: {file}");
             }
         }
+        files = files.Select(Path.GetFullPath).Select(f => f.Trim()).ToArray();
         SetFileDrop(files);
     }
 
@@ -77,8 +78,15 @@ class Program
         }
 
         // Calculate size
-        int numFiles = files.Length;
-        int size = Marshal.SizeOf(typeof(DROPFILES)) + (numFiles * Marshal.SystemDefaultCharSize * 260) + 2; // +2 for null terminator
+        // int numFiles = files.Length;
+        int size = 0;
+        foreach (string file in files)
+        {
+            var file_chars = file.ToCharArray();
+            size += (file_chars.Length + 1) * Marshal.SystemDefaultCharSize;
+        }
+        size += Marshal.SizeOf(typeof(DROPFILES)) + Marshal.SystemDefaultCharSize; // +2 for null terminator
+        // Console.WriteLine($"Size: {size}");
         IntPtr hGlobal = IntPtr.Zero;
 
         try
@@ -92,7 +100,7 @@ class Program
             }
 
             // Lock the memory
-            DROPFILES dropFiles = new DROPFILES
+            DROPFILES dropFiles = new()
             {
                 pFiles = Marshal.SizeOf(typeof(DROPFILES)),
                 pt = new POINT { x = 0, y = 0 },
@@ -107,8 +115,9 @@ class Program
             IntPtr filePathPtr = IntPtr.Add(pGlobal, Marshal.SizeOf(typeof(DROPFILES)));
             foreach (string file in files)
             {
-                Marshal.Copy(file.ToCharArray(), 0, filePathPtr, file.Length);
-                filePathPtr = IntPtr.Add(filePathPtr, file.Length * Marshal.SystemDefaultCharSize);
+                var file_chars = file.ToCharArray();
+                Marshal.Copy(file_chars, 0, filePathPtr, file_chars.Length);
+                filePathPtr = IntPtr.Add(filePathPtr, file_chars.Length * Marshal.SystemDefaultCharSize);
                 Marshal.WriteByte(filePathPtr, 0); // Null-terminate each string
                 filePathPtr = IntPtr.Add(filePathPtr, Marshal.SystemDefaultCharSize);
             }
@@ -118,24 +127,28 @@ class Program
 
             if (OpenClipboard(IntPtr.Zero))
             {
-                EmptyClipboard();
+                if (EmptyClipboard())
+                {
+                    Console.WriteLine("Clipboard cleared.");
+                }
                 if (SetClipboardData(CF_HDROP, hGlobal) != IntPtr.Zero)
                 {
                     Console.WriteLine("Files copied to clipboard.");
                 }
-                CloseClipboard();
             }
         }
         catch (Exception e)
         {
             Console.WriteLine(e.Message);
+            if (hGlobal != IntPtr.Zero)
+            {
+                Console.WriteLine("Freeing global memory.");
+                GlobalUnlock(hGlobal);
+            }
         }
         finally
         {
-            if (hGlobal != IntPtr.Zero)
-            {
-                GlobalUnlock(hGlobal);
-            }
+            CloseClipboard();
         }
     }
 }
